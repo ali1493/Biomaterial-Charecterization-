@@ -1,0 +1,14 @@
+# Raw and generated data stay local until you decide what can be published
+data/**
+!data/**/
+!data/**/README.md
+reports/**
+!reports/.gitkeep
+
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/
+.env
+.ipynb_checkpoints/
+*.opju

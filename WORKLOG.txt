@@ -1,0 +1,162 @@
+BIOMAT-CHAR-AGENT  -  WORK LOG
+==============================
+Owner: Ali Özmen
+Purpose: an AI agent that reads raw biomaterial characterization data, computes results, makes figures,
+and writes results text only from numbers it actually computed (no invented values, no invented references).
+
+How to read this file: newest entry on top. Each entry says WHAT was done, WHY, and WHAT IS STILL OPEN.
+The detailed scientific findings are in docs/findings_*.md.
+
+
+------------------------------------------------------------------------
+2026-11-02  (session 2)  Thesis dataset + mock data + benchmark
+------------------------------------------------------------------------
+
+DONE
+1. Added the thesis dataset (thiol-yne PEG hydrogels, Acıbadem BAP 2019/04) as a second project.
+   - configs/thiol_yne_ha_hydrogel.yaml   samples, composition, methods, assumptions
+   - knowledge/ftir_bands_thiol_yne.yaml  band table: S-H, alkyne, ester C=O, HA, PEG, residual DMF
+   - Project data now lives in its own folder: data/thiol_yne/raw/, outputs in reports/thiol_yne/
+
+2. New file readers
+   - io/spa.py        Thermo Nicolet OMNIC .SPA (binary FTIR)
+   - io/rheology.py   Malvern Kinexus CSV (semicolon, decimal comma) and generic G'/G'' tables
+   - io/hydrogel.py   swelling workbook (one sheet per sample) and gel-conversion sheet
+   - io/tga.py        fixed: now reads UTF-8 / Turkish (cp1254) headers. The mock benchmark found this bug.
+
+3. New analyses
+   - analysis/rheology.py  removes bad points automatically, recording a reason for each:
+                           phase outside 0-90 deg (instrument inertia), harmonic distortion > 5 %,
+                           strain not yet at the set value.
+                           Reports G', G'', tan delta at 1 Hz, power-law exponent, crossover, gap.
+   - analysis/hydrogel.py  swelling equilibrium, first-order rate constant, t90, data warnings;
+                           gel fraction with a cross-check against values printed in a report.
+
+4. Multi-project support
+   - Each config has paths: data / reports / ftir_bands, plus per-sample "aliases" (regex) to match
+     messy file names ("ali yuzde 10 smooth", "Reo_H_10PLA", sheet "10%", gel row "0.1").
+   - Byte-identical files are detected and loaded once (reported as duplicates).
+   - FTIR ratio windows and figure marker lines now come from the config, not the code.
+
+5. Mock data generator + benchmark (src/biomatchar/mock.py, benchmark.py)
+   - Writes a complete fake 4-sample study in REAL instrument formats: PerkinElmer .asc, OMNIC .spa,
+     PANalytical .xrdml, HighScore .txt, machine SpreadsheetML .xls, TGA csv, Kinexus csv, swelling and gel xlsx.
+   - Known ground truth for every number (ground_truth.json).
+   - Two scenarios:
+       clean : tidy data
+       messy : noise, sloping baselines, duplicate exports, broken XML prolog, decimal commas,
+               Turkish headers, rheometer inertia artefacts, 50 % harmonic distortion, empty swelling sheet
+   - Benchmark compares pipeline output with the truth: 44 checks (clean), 51 checks (messy).
+     Result: all checks pass on 2 clean and 3 messy seeds.
+   - Commands:  biomatchar mock --scenario messy --seed 3
+                biomatchar benchmark --scenario messy --seed 3
+
+6. Agent
+   - New tools: select_project, rheology_summary, swelling_summary, gel_fraction.
+   - The agent now sees the config's assumption notes (for example "series interpretation: confirm").
+
+7. Tests: 9 passing (readers, analyses, 3 benchmark runs, all agent tools on mock data).
+
+KEY FINDINGS (thesis data, details in docs/findings_thiol_yne.md)
+   - The files H_0/5/10/20PLA look like the PLA series, not the HA series: the 0 % file has no
+     ester C=O at ~1757 cm-1 and the others do. The config now uses this reading. CONFIRM.
+   - "ali ... smooth.SPA" and "ali ... raw.csv" are exact copies of the H_ files.
+   - Rheology: tan delta 0.55 (blank), 0.11 (10 % PLA), 0.31 (20 % PLA), so PLA makes the gel more elastic.
+     But the gap differs 0.70 / 0.23 / 0.41 mm, so the G' values are not yet comparable.
+   - Swelling: no dry mass recorded, and only a 2-3.5 % gain, so the first weighing was already swollen.
+   - Raw gel conversion (87.1/85.7/76.5/84.9 %) does not match report Table 4 (82.5/65.3/85.2/78.4 %),
+     consistent with them being different series.
+   - Strong ~1668 cm-1 band in the blank = probably residual DMF.
+
+OPEN / NEXT
+   - See "WHAT I NEED FROM YOU" and "ROADMAP" below.
+
+
+------------------------------------------------------------------------
+2026-11-02  (session 1)  ChatGPT export -> repo, nano-silica film project
+------------------------------------------------------------------------
+
+DONE
+1. Extracted the ChatGPT project "nano silica" (9 chats) from the account export into Markdown.
+   Summary in docs/chatgpt_project_history.md.
+2. Built the package: src/biomatchar/
+   - Readers: PerkinElmer .asc FTIR, PANalytical .xrdml, HighScore .txt XRD, machine .xls tensile
+     (Excel 2003 XML, including files with a broken prolog), generic TGA, Origin-style wide xlsx.
+   - Analyses: FTIR (absorbance, baseline, peaks, band assignment with overlap warnings,
+     band-area ratios vs control), XRD (halo, sharp peaks, d-spacing, Scherrer, ZnO match,
+     relative crystallinity), tensile (UTS, elongation at break, duplicates removed, mean +/- SD), TGA.
+   - Figures in the style used for the report (white, no grid, inverted wavenumber axis, 600 dpi)
+     and Origin-ready xlsx exports.
+   - Agent: Claude tool-use loop (agent/run.py) with tools in agent/tools.py. Needs ANTHROPIC_API_KEY.
+3. Ran it on the nano-silica film data. Findings in docs/findings_from_data.md:
+   - The 818 cm-1 band is in the control too, so it is not Zn-O (Zn-O is below the 650 cm-1 scan limit).
+   - The Si-O-Si band ratio rises steadily with nSiO2 loading (1.44 -> 1.56 -> 1.62 x control).
+   - XRD: a sharp 26.0 deg peak appears in every film including the control; no ZnO peaks; all fillers amorphous.
+   - Tensile: Zn films are not stronger than the control within the scatter.
+
+
+========================================================================
+WHAT I NEED FROM YOU (to make the results trustworthy)
+========================================================================
+Thesis (thiol-yne):
+  [ ] Confirm: H_0/5/10/20PLA = PLA % series (no HA)?  Or is it HA %?
+  [ ] Raw data for the HA series (H5-H8): rheometer CSVs behind the "REO DATA" PNGs, FTIR, gel yield masses.
+  [ ] Swelling: dry mass of each gel, medium (water / PBS), temperature. The 5 % sheet has no masses.
+  [ ] FTIR of the uncured monomer mix (propargyl ether + TEG dithiol) and of pure PLA-propargyl and HA,
+      so conversion (S-H and alkyne loss) and the new bands can be quantified.
+  [ ] Rheology: was 0.7 / 0.23 / 0.41 mm the gel thickness? Ideally re-measure at one gap,
+      plus an amplitude sweep to prove 5 % strain is in the linear region.
+  [ ] Which file is really 10 % PLA rheology? (its internal description says "20lik")
+  [ ] SEM / SEM-EDX images (pore size analysis can be added).
+  [ ] Report text uses both "poli(kaprolakton) propargil" and "PLA": which polymer was used?
+
+Nano-silica films:
+  [ ] Confirm the tensile file -> sample map (1 = 0.2 % Zn, 2 = 0.1 %, 3 = 0.3 %, 4 = control).
+  [ ] Gauge length of the tensile specimens (gives strain % and modulus).
+  [ ] Raw TGA files (NUM 1-10 .xlsx); only PNGs are in the folder.
+  [ ] Tensile data for the nSiO2 and nSiA films.
+  [ ] Permission from co-workers before any of their data goes public.
+
+General:
+  [ ] An Anthropic API key to test the agent loop itself. The tools are tested; the conversation loop is not yet.
+
+
+========================================================================
+ROADMAP (code improvements, in priority order)
+========================================================================
+ 1. Swelling: fit sigmoidal / Peppas (M_t/M_inf = k t^n) models. The thesis curve has a lag phase that
+    first-order kinetics does not describe.
+ 2. FTIR: degree of conversion from S-H and alkyne bands against a monomer reference spectrum;
+    difference spectra (sample - control); peak fitting for overlapping bands.
+ 3. Rheology: amplitude sweep reader (linear viscoelastic limit), time sweep (gel point,
+    G'/G'' crossover during UV curing), mesh size estimate from G' (rubber elasticity).
+ 4. SEM: pore size and porosity from images (thresholding + particle analysis), EDX spectrum reader.
+ 5. Statistics: ANOVA / Tukey between samples, report p-values, so text says "significant" only when it is.
+ 6. Literature: a reference library (BibTeX with DOIs you have verified) the agent can cite from.
+    It will never invent a citation.
+ 7. Report builder: export the agent's results section to a Word / Google Doc with figures and tables.
+ 8. More formats: Bruker OPUS FTIR, TA Instruments TGA/DSC (.txt), Anton Paar rheometer, DSC analysis (Tg, Tm, crystallinity).
+ 9. Mock data: add DSC, SEM images and amplitude sweeps; add a "mislabelled sample" scenario the agent must detect.
+10. CI: GitHub Actions running pytest + benchmark on every push.
+
+
+========================================================================
+REPO MAP
+========================================================================
+configs/                     one YAML per study (samples, aliases, methods, assumptions)
+knowledge/                   FTIR band tables per material system
+src/biomatchar/io/           instrument file readers
+src/biomatchar/analysis/     ftir, xrd, tensile, tga, rheology, hydrogel
+src/biomatchar/pipeline.py   runs everything for one project
+src/biomatchar/mock.py       mock study generator (ground truth)
+src/biomatchar/benchmark.py  scores pipeline vs ground truth
+src/biomatchar/agent/        Claude tool-use agent + tools
+docs/                        findings per project, ChatGPT history
+data/  reports/              local only (git-ignored)
+tests/                       pytest suite
+
+Commands
+  biomatchar projects
+  biomatchar run --config thiol_yne_ha_hydrogel
+  biomatchar benchmark --scenario messy --seed 3
+  biomatchar ask "Write the rheology results for the PLA series in Turkish, 120 words" --config thiol_yne_ha_hydrogel
